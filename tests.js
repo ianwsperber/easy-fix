@@ -1,5 +1,6 @@
 /* globals describe, beforeEach, afterEach, it */
 'use strict';
+/* eslint-disable max-nested-callbacks */
 
 const sinon = require('sinon');
 const domain = require('domain');
@@ -8,9 +9,11 @@ const easyFix = require('./index');
 const config = require('./test-config');
 
 const ASYNC_DELAY = 1000;
+const METHOD_TO_FIX = 'incStateNextTick';
+
 const thingToTest = {
   state: 0,
-  incStateNextTick: (stateArg, callback) => {
+  [METHOD_TO_FIX]: (stateArg, callback) => {
     thingToTest.state = stateArg.val;
     process.nextTick(() => {
       thingToTest.state += 1;
@@ -29,96 +32,99 @@ const thingToTest = {
   }
 };
 
-let easyFixStub;
-const runSharedTests = (expectTargetFnCalls) => {
+const runSharedTests = (expectTargetFnCalls, options) => {
+  let easyFixStub;
 
-  it('falls back onto wrapped method', (done) => {
-    thingToTest.incStateNextTick({ val: 0 }, (err, state) => {
-      expect(state).to.equal(1);
-      const expectedTargetState = expectTargetFnCalls ? 1 : 0;
-      expect(thingToTest.state).to.equal(expectedTargetState);
-      expect(easyFixStub.callCount).to.equal(1);
-      done();
+  describe('common tests', () => {
+    beforeEach(() => {
+      thingToTest.resetState();
+      easyFixStub = easyFix.wrapAsyncMethod(
+        thingToTest, METHOD_TO_FIX, options.easyFixOptions);
     });
-  });
 
-  it('works with mulitple calls', (done) => {
-    thingToTest.incStateNextTick({ val: 0 }, (firstErr, firstState) => {
-      thingToTest.incStateNextTick({ val: firstState }, (secondErr, secondState) => {
-        expect(secondState).to.equal(2);
-        const expectedTargetState = expectTargetFnCalls ? 2 : 0;
+    afterEach(() => {
+      easyFixStub.restore();
+    });
+
+    it('falls back onto wrapped method', (done) => {
+      thingToTest[METHOD_TO_FIX]({ val: 0 }, (err, state) => {
+        expect(state).to.equal(1);
+        const expectedTargetState = expectTargetFnCalls ? 1 : 0;
         expect(thingToTest.state).to.equal(expectedTargetState);
-        expect(easyFixStub.callCount).to.equal(2);
+        expect(easyFixStub.callCount).to.equal(1);
         done();
       });
     });
-  });
 
-  it('works with circular references', (done) => {
-    const testObj = { val: 0 };
-    testObj.circ = testObj;
-    thingToTest.incStateNextTick(testObj, (err, state) => {
-      expect(state).to.equal(1);
-      const expectedTargetState = expectTargetFnCalls ? 1 : 0;
-      expect(thingToTest.state).to.equal(expectedTargetState);
-      expect(easyFixStub.callCount).to.equal(1);
-      done();
+    it('works with mulitple calls', (done) => {
+      thingToTest[METHOD_TO_FIX]({ val: 0 }, (firstErr, firstState) => {
+        thingToTest[METHOD_TO_FIX]({ val: firstState }, (secondErr, secondState) => {
+          expect(secondState).to.equal(2);
+          const expectedTargetState = expectTargetFnCalls ? 2 : 0;
+          expect(thingToTest.state).to.equal(expectedTargetState);
+          expect(easyFixStub.callCount).to.equal(2);
+          done();
+        });
+      });
+    });
+
+    it('works with circular references', (done) => {
+      const testObj = { val: 0 };
+      testObj.circ = testObj;
+      thingToTest[METHOD_TO_FIX](testObj, (err, state) => {
+        expect(state).to.equal(1);
+        const expectedTargetState = expectTargetFnCalls ? 1 : 0;
+        expect(thingToTest.state).to.equal(expectedTargetState);
+        expect(easyFixStub.callCount).to.equal(1);
+        done();
+      });
     });
   });
 };
 
 describe('wrapAsyncMethod (live mode)', () => {
-  beforeEach(() => {
-    thingToTest.resetState();
-    easyFixStub = easyFix.wrapAsyncMethod(thingToTest, 'incStateNextTick', {
+  runSharedTests(true, {
+    easyFixOptions: {
       mode: 'live',
       sinon,
       dir: 'tmp'
-    });
+    }
   });
-  afterEach(() => {
-    easyFixStub.restore();
-  });
-
-  runSharedTests(true);
 });
 
 describe('wrapAsyncMethod (capture mode)', () => {
-  beforeEach(() => {
-    thingToTest.resetState();
-    easyFixStub = easyFix.wrapAsyncMethod(thingToTest, 'incStateNextTick', {
+  runSharedTests(true, {
+    easyFixOptions: {
       mode: 'capture',
       sinon,
       dir: 'tmp'
-    });
+    }
   });
-  afterEach(() => {
-    easyFixStub.restore();
-  });
-
-  runSharedTests(true);
 });
 
 describe('wrapAsyncMethod (replay mode)', () => {
-  const STUBBED_METHOD = 'incStateNextTick';
+  const easyFixOptions = {
+    mode: 'replay',
+    sinon,
+    dir: 'tmp'
+  };
 
-  beforeEach(() => {
-    thingToTest.resetState();
-    easyFixStub = easyFix.wrapAsyncMethod(thingToTest, STUBBED_METHOD, {
-      mode: 'replay',
-      sinon,
-      dir: 'tmp'
-    });
-  });
-  afterEach(() => {
-    easyFixStub.restore();
-  });
-
-  runSharedTests(false);
+  runSharedTests(false, { easyFixOptions });
 
   describe('if no matching mock data is found', () => {
+    let easyFixStub;
+
+    beforeEach(() => {
+      thingToTest.resetState();
+      easyFixStub = easyFix.wrapAsyncMethod(
+        thingToTest, METHOD_TO_FIX, easyFixOptions);
+    });
+    afterEach(() => {
+      easyFixStub.restore();
+    });
+
     const fnWithoutMocks = (cb) => {
-      thingToTest[STUBBED_METHOD]({
+      thingToTest[METHOD_TO_FIX]({
         foo: 'bar'
       }, () => { cb(new Error('Failed to throw')); });
     };

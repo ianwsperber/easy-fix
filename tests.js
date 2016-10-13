@@ -3,6 +3,7 @@
 /* eslint-disable max-nested-callbacks */
 
 const sinon = require('sinon');
+const _ = require('lodash');
 const domain = require('domain');
 const expect = require('chai').expect;
 const easyFix = require('./index');
@@ -77,6 +78,58 @@ const runSharedTests = (expectTargetFnCalls, options) => {
         expect(thingToTest.state).to.equal(expectedTargetState);
         expect(easyFixStub.callCount).to.equal(1);
         done();
+      });
+    });
+
+    describe('options.filter', () => {
+      let isFiltered;
+      let lastArgs;
+
+      beforeEach(() => {
+        isFiltered = false;
+        easyFixStub.restore();
+        easyFixStub = easyFix.wrapAsyncMethod(thingToTest, METHOD_TO_FIX,
+          _.extend({}, options.easyFixOptions, {
+            filter: (args) => {
+              lastArgs = args;
+
+              return isFiltered;
+            }
+          })
+        );
+      });
+
+      afterEach(() => easyFixStub.restore());
+
+      it('passes the provided arguments to the filter function', (done) => {
+        const opts = { val: 0 };
+        const cb = () => {
+          expect(lastArgs).to.eql([opts, cb]);
+          done();
+        };
+
+        thingToTest[METHOD_TO_FIX](opts, cb);
+      });
+
+      it('will call the original function if the filter returns false', (done) => {
+        isFiltered = false;
+        thingToTest[METHOD_TO_FIX]({ val: 0 }, (err, state) => {
+          expect(state).to.equal(1);
+          expect(thingToTest.state).to.equal(1);
+          expect(easyFixStub.callCount).to.equal(1);
+          done();
+        });
+      });
+
+      it('will follow default behavior if the filter returns true', (done) => {
+        isFiltered = true;
+        thingToTest[METHOD_TO_FIX]({ val: 0 }, (err, state) => {
+          expect(state).to.equal(1);
+          const expectedTargetState = expectTargetFnCalls ? 1 : 0;
+          expect(thingToTest.state).to.equal(expectedTargetState);
+          expect(easyFixStub.callCount).to.equal(1);
+          done();
+        });
       });
     });
   });

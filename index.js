@@ -81,12 +81,16 @@ exports.wrapAsyncMethod = function (obj, method, optionsArg) {
   };
   options.responsePath = optionsArg.responsePath;
   options.sinon = optionsArg.sinon;
+  options.filter = optionsArg.filter;
 
   const wrapper = function () {
     const callingArgs = Array.apply(null, arguments);
     const self = this;
 
-    if (options.mode === modes.live) { // no fixtures, no problems
+    const isLive = options.mode === modes.live;
+    const isMatching = options.filter ? options.filter(callingArgs) : true;
+
+    if (!isMatching || isLive && isMatching) {
       return originalFn.apply(self, callingArgs);
     }
 
